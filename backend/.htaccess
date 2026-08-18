@@ -1,0 +1,6 @@
+# Required by CloudLinux/cPanel Node.js Selector.
+# The selector reads this file on start/restart and injects Passenger config
+# between the CLOUDLINUX PASSENGER CONFIGURATION markers.
+#
+# If you see FileNotFoundError for .htaccess on the server, ensure this file
+# exists at the app root (e.g. /home/ilinkmth/crmbackend.ilink.market/.htaccess).
