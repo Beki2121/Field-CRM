@@ -1,5 +1,6 @@
 import express from "express";
 import { pool } from "../db.js";
+import { parseJsonColumn } from "../lib/jsonColumn.js";
 import {
   BUSINESS_STATUSES,
   SECTORS,
@@ -22,7 +23,7 @@ const normalizeRecord = (row) => ({
   notes: row.notes,
   status: row.status,
   salesStage: row.salesStage,
-  sectorFields: row.sectorFields ? JSON.parse(row.sectorFields) : {},
+  sectorFields: parseJsonColumn(row.sectorFields),
   createdAt: Number(row.createdAt),
   updatedAt: Number(row.updatedAt),
 });
@@ -107,7 +108,10 @@ businessesRouter.post("/", async (req, res) => {
     res.status(201).json(normalizeRecord(row));
   } catch (error) {
     console.error("POST /api/businesses error:", error);
-    res.status(500).json({ error: "Failed to create business" });
+    res.status(500).json({
+      error: "Failed to create business",
+      details: error.message,
+    });
   }
 });
 

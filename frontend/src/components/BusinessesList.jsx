@@ -126,62 +126,64 @@ export default function BusinessesList({
             const lv = latestVisitFor(b.id);
             return (
               <Card key={b.id} className="p-3.5">
-                <div className="flex items-start gap-3 mb-2">
-                  <button
-                    onClick={() => goto("profile", b.id)}
-                    className="flex-1 min-w-0 text-left cursor-pointer active:scale-[0.99] transition"
-                  >
-                    <p
-                      className="text-sm font-bold truncate"
-                      style={{ color: C.ink }}
-                    >
-                      {b.businessName}
-                    </p>
-                    <p
-                      className="text-xs mt-0.5"
-                      style={{ color: C.inkFaint }}
-                    >
-                      {b.sector} · {b.contactPerson}
-                    </p>
-                  </button>
-                  <div className="flex flex-col items-end gap-2 shrink-0">
-                    {lv && <InterestBadge value={lv.interestStatus} />}
-                    <button
-                      onClick={async (e) => {
-                        e.stopPropagation();
-                        if (
-                          !window.confirm(
-                            `Delete "${b.businessName}" and all its visits? This cannot be undone.`,
-                          )
-                        )
-                          return;
-                        try {
-                          await onDelete(b.id);
-                        } catch (error) {
-                          alert("Error deleting business: " + error.message);
-                        }
-                      }}
-                      className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold transition active:scale-95"
-                      style={{ color: "#d32f2f", background: "#fdecea" }}
-                      title="Delete business"
-                    >
-                      <Trash2 size={13} />
-                      Delete
-                    </button>
-                  </div>
-                </div>
-                <div
-                  className="flex items-center gap-3 text-xs"
-                  style={{ color: C.inkFaint }}
+                <button
+                  onClick={() => goto("profile", b.id)}
+                  className="w-full text-left cursor-pointer active:scale-[0.99] transition mb-2"
                 >
-                  <span>
-                    Last visit: {lv ? fmtDateShort(lv.visitDate) : "—"}
-                  </span>
-                  {lv && lv.nextFollowUpDate && !lv.followUpCompleted && (
-                    <span className="font-semibold" style={{ color: C.clay }}>
-                      Next: {fmtDateShort(lv.nextFollowUpDate)}
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0 flex-1">
+                      <p
+                        className="text-sm font-bold truncate"
+                        style={{ color: C.ink }}
+                      >
+                        {b.businessName}
+                      </p>
+                      <p
+                        className="text-xs mt-0.5"
+                        style={{ color: C.inkFaint }}
+                      >
+                        {b.sector} · {b.contactPerson}
+                      </p>
+                    </div>
+                    {lv && <InterestBadge value={lv.interestStatus} />}
+                  </div>
+                </button>
+                <div className="flex items-center justify-between gap-3 pt-2 border-t border-[#E9EDE4]">
+                  <div
+                    className="flex items-center gap-3 text-xs min-w-0"
+                    style={{ color: C.inkFaint }}
+                  >
+                    <span>
+                      Last visit: {lv ? fmtDateShort(lv.visitDate) : "—"}
                     </span>
-                  )}
+                    {lv && lv.nextFollowUpDate && !lv.followUpCompleted && (
+                      <span className="font-semibold" style={{ color: C.clay }}>
+                        Next: {fmtDateShort(lv.nextFollowUpDate)}
+                      </span>
+                    )}
+                  </div>
+                  <button
+                    onClick={async (e) => {
+                      e.stopPropagation();
+                      if (
+                        !window.confirm(
+                          `Delete "${b.businessName}" and all its visits? This cannot be undone.`,
+                        )
+                      )
+                        return;
+                      try {
+                        await onDelete(b.id);
+                      } catch (error) {
+                        alert("Error deleting business: " + error.message);
+                      }
+                    }}
+                    className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold transition active:scale-95 shrink-0"
+                    style={{ color: "#d32f2f", background: "#fdecea" }}
+                    title="Delete business"
+                  >
+                    <Trash2 size={13} />
+                    Delete
+                  </button>
                 </div>
               </Card>
             );
