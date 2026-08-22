@@ -1,6 +1,6 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
-import App from "./App.jsx";
+import { ProtectedApp } from "./App.jsx";
 import "./index.css";
 import appIcon from "./Asset/images.png";
 
@@ -23,9 +23,9 @@ if (!API_BASE) {
   window.addEventListener("load", () => {
     import("virtual:pwa-register").then(({ registerSW }) => {
       registerSW({
-        immediate: false,
+        immediate: true,
         onNeedRefresh() {
-          console.log("A new version is available.");
+          window.dispatchEvent(new CustomEvent("pwa-update-available"));
         },
         onOfflineReady() {
           console.log("App is ready for offline use.");
@@ -36,7 +36,7 @@ if (!API_BASE) {
 
   ReactDOM.createRoot(document.getElementById("root")).render(
     <React.StrictMode>
-      <App />
+      <ProtectedApp />
     </React.StrictMode>,
   );
 }

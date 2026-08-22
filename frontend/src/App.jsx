@@ -1,8 +1,9 @@
-import { useState, useEffect, Suspense, lazy } from "react";
-import { Check, AlertCircle, Loader2 } from "lucide-react";
+import { useState, useEffect, useRef, Suspense, lazy } from "react";
+import { Check, AlertCircle, Loader2, Moon, Sun } from "lucide-react";
 import { C } from "./lib/constants.js";
 import { useCrmData } from "./hooks/useCrmData.js";
 import { Sidebar, MobileNav } from "./components/layout/Navigation.jsx";
+import { ConfirmDialog } from "./components/ui/Primitives.jsx";
 
 const Dashboard = lazy(() => import("./components/Dashboard.jsx"));
 const BusinessesList = lazy(() => import("./components/BusinessesList.jsx"));
@@ -15,6 +16,101 @@ const LazyRescheduleModal = lazy(() =>
     default: m.RescheduleModal,
   })),
 );
+
+function ThemeToggle() {
+  const [theme, setTheme] = useState(
+    () => localStorage.getItem("field_crm_theme") || "light",
+  );
+  const [position, setPosition] = useState(() => {
+    try {
+      return (
+        JSON.parse(localStorage.getItem("field_crm_theme_position")) || {
+          top: 16,
+          left: window.innerWidth - 60,
+        }
+      );
+    } catch {
+      return { top: 16, left: 16 };
+    }
+  });
+  const drag = useRef(null);
+  const moved = useRef(false);
+  const positionRef = useRef(position);
+
+  useEffect(() => {
+    positionRef.current = position;
+  }, [position]);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    localStorage.setItem("field_crm_theme", theme);
+  }, [theme]);
+
+  useEffect(() => {
+    const move = (event) => {
+      if (!drag.current) return;
+      moved.current = true;
+      setPosition({
+        left: Math.max(
+          8,
+          Math.min(window.innerWidth - 52, event.clientX - drag.current.x),
+        ),
+        top: Math.max(
+          8,
+          Math.min(window.innerHeight - 52, event.clientY - drag.current.y),
+        ),
+      });
+    };
+    const up = () => {
+      if (drag.current) {
+        localStorage.setItem(
+          "field_crm_theme_position",
+          JSON.stringify(positionRef.current),
+        );
+      }
+      drag.current = null;
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    return () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+    };
+  }, []);
+
+  const Icon = theme === "dark" ? Sun : Moon;
+  return (
+    <button
+      aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
+      title="Drag to move theme switch"
+      onPointerDown={(event) => {
+        moved.current = false;
+        drag.current = {
+          x: event.clientX - position.left,
+          y: event.clientY - position.top,
+        };
+      }}
+      onClick={() => {
+        if (!moved.current) {
+          setTheme((value) => {
+            const next = value === "dark" ? "light" : "dark";
+            document.documentElement.dataset.theme = next;
+            return next;
+          });
+        }
+      }}
+      className="fixed z-50 w-10 h-10 rounded-full flex items-center justify-center shadow-lg touch-none"
+      style={{
+        left: position.left,
+        top: position.top,
+        background: C.primary,
+        color: "#fff",
+      }}
+    >
+      <Icon size={17} />
+    </button>
+  );
+}
 
 export default function App() {
   const {
@@ -31,11 +127,14 @@ export default function App() {
     sectorSummary,
     addBusiness,
     updateBusiness,
+    updateVisit,
     addVisit,
     completeFollowUp,
     rescheduleFollowUp,
     removeBusiness,
     removeVisit,
+    reloadData,
+    sync,
   } = useCrmData();
 
   const [view, setView] = useState("dashboard");
@@ -44,6 +143,48 @@ export default function App() {
   const [toast, setToast] = useState(null);
   const [followUpTab, setFollowUpTab] = useState("today");
   const [rescheduleTarget, setRescheduleTarget] = useState(null);
+  const [updateAvailable, setUpdateAvailable] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [confirmExit, setConfirmExit] = useState(false);
+  const viewRef = useRef(view);
+  const selectedIdRef = useRef(selectedId);
+  const allowExit = useRef(false);
+
+  useEffect(() => {
+    viewRef.current = view;
+    selectedIdRef.current = selectedId;
+  }, [view, selectedId]);
+
+  useEffect(() => {
+    const dashboardState = { crm: true, view: "dashboard", selectedId: null };
+    window.history.replaceState(dashboardState, "", window.location.href);
+    const handleBack = (event) => {
+      if (allowExit.current) {
+        allowExit.current = false;
+        return;
+      }
+      if (viewRef.current !== "dashboard") {
+        const nextState = event.state?.crm ? event.state : dashboardState;
+        setView(nextState.view);
+        setSelectedId(nextState.selectedId || null);
+        return;
+      }
+      window.history.pushState(
+        { crm: true, view: "dashboard", selectedId: null },
+        "",
+        window.location.href,
+      );
+      setConfirmExit(true);
+    };
+    window.addEventListener("popstate", handleBack);
+    return () => window.removeEventListener("popstate", handleBack);
+  }, []);
+
+  useEffect(() => {
+    const onUpdate = () => setUpdateAvailable(true);
+    window.addEventListener("pwa-update-available", onUpdate);
+    return () => window.removeEventListener("pwa-update-available", onUpdate);
+  }, []);
 
   useEffect(() => {
     if (!toast) return;
@@ -52,9 +193,30 @@ export default function App() {
   }, [toast]);
 
   const goto = (v, id) => {
+    window.history.pushState(
+      { crm: true, view: v, selectedId: id || null },
+      "",
+      window.location.href,
+    );
     setSelectedId(id || null);
     setView(v);
     window.scrollTo?.(0, 0);
+  };
+
+  const handleSync = async () => {
+    setSyncing(true);
+    try {
+      const data = await sync();
+      setToast({
+        text: data.synced
+          ? `Synced ${data.synced} pending action${data.synced === 1 ? "" : "s"}.`
+          : "Already up to date.",
+      });
+    } catch (error) {
+      setToast({ text: `Sync failed: ${error.message}`, isError: true });
+    } finally {
+      setSyncing(false);
+    }
   };
 
   if (loading) {
@@ -104,7 +266,7 @@ export default function App() {
   }
 
   const selectedBusiness = businesses.find((b) => b.id === selectedId) || null;
-  const pendingCount = todayFollowUps.length + overdueFollowUps.length;
+  const followUpCount = todayFollowUps.length + overdueFollowUps.length;
 
   const screenFallback = (
     <div
@@ -127,10 +289,34 @@ export default function App() {
         fontFamily: "Inter, sans-serif",
       }}
     >
+      <ThemeToggle />
       <div className="max-w-5xl mx-auto md:flex md:gap-6 md:pt-6">
-        <Sidebar view={view} goto={goto} pendingCount={pendingCount} />
+        <Sidebar
+          view={view}
+          goto={goto}
+          pendingCount={followUpCount}
+          onSync={handleSync}
+          syncing={syncing}
+        />
 
         <main className="flex-1 pb-24 md:pb-10 px-4 md:px-0 pt-4 md:pt-0">
+          {updateAvailable && (
+            <div
+              className="mb-3 px-3 py-2.5 rounded-xl flex items-center justify-between gap-3"
+              style={{ background: C.amberSoft, color: C.amber }}
+            >
+              <span className="text-xs font-semibold">
+                A new app version is available. Update to see the latest fixes.
+              </span>
+              <button
+                onClick={() => window.location.reload()}
+                className="px-3 py-1.5 rounded-lg text-xs font-bold shrink-0"
+                style={{ background: C.amber, color: "#fff" }}
+              >
+                Update now
+              </button>
+            </div>
+          )}
           <Suspense fallback={screenFallback}>
             {view === "dashboard" && (
               <Dashboard
@@ -221,6 +407,17 @@ export default function App() {
                   }
                 }}
                 onReschedule={(f) => setRescheduleTarget(f)}
+                onUpdateVisit={async (id, patch) => {
+                  try {
+                    await updateVisit(id, patch);
+                    setToast({ text: "Visit updated." });
+                  } catch (error) {
+                    setToast({
+                      text: `Error: ${error.message}`,
+                      isError: true,
+                    });
+                  }
+                }}
                 onDelete={async (id) => {
                   try {
                     await removeBusiness(id);
@@ -269,7 +466,13 @@ export default function App() {
         </main>
       </div>
 
-      <MobileNav view={view} goto={goto} pendingCount={pendingCount} />
+      <MobileNav
+        view={view}
+        goto={goto}
+        pendingCount={followUpCount}
+        onSync={handleSync}
+        syncing={syncing}
+      />
 
       {toast && (
         <div
@@ -297,6 +500,96 @@ export default function App() {
           />
         </Suspense>
       )}
+
+      {confirmExit && (
+        <ConfirmDialog
+          title="Exit Field CRM?"
+          message="Are you sure you want to leave the app?"
+          confirmLabel="Exit"
+          onClose={() => setConfirmExit(false)}
+          onConfirm={() => {
+            setConfirmExit(false);
+            allowExit.current = true;
+            window.history.go(-2);
+          }}
+        />
+      )}
     </div>
+  );
+}
+
+function DeviceAccessGate({ children }) {
+  const [allowed, setAllowed] = useState(
+    () => localStorage.getItem("field_crm_device_allowed") === "true",
+  );
+  const [passcode, setPasscode] = useState("");
+  const [error, setError] = useState("");
+
+  if (allowed) return children;
+
+  const submit = (event) => {
+    event.preventDefault();
+    if (passcode === "4555") {
+      localStorage.setItem("field_crm_device_allowed", "true");
+      setAllowed(true);
+    } else {
+      setError("That passcode is not correct.");
+      setPasscode("");
+    }
+  };
+
+  return (
+    <div
+      className="min-h-screen flex items-center justify-center px-5"
+      style={{ background: C.bg }}
+    >
+      <form
+        onSubmit={submit}
+        className="w-full max-w-sm p-6 rounded-2xl"
+        style={{ background: C.surface, border: `1px solid ${C.border}` }}
+      >
+        <h1
+          className="text-xl font-bold mb-2"
+          style={{ color: C.ink, fontFamily: "Space Grotesk, sans-serif" }}
+        >
+          Device access
+        </h1>
+        <p className="text-sm mb-5" style={{ color: C.inkSoft }}>
+          Enter the 4-digit passcode to use Field CRM on this device.
+        </p>
+        <input
+          autoFocus
+          inputMode="numeric"
+          maxLength={4}
+          pattern="[0-9]{4}"
+          value={passcode}
+          onChange={(event) =>
+            setPasscode(event.target.value.replace(/\D/g, ""))
+          }
+          className="w-full px-3 py-3 rounded-xl text-center text-xl tracking-[0.4em]"
+          style={{ border: `1px solid ${C.border}`, color: C.ink }}
+        />
+        {error && (
+          <p className="text-xs font-semibold mt-2" style={{ color: C.red }}>
+            {error}
+          </p>
+        )}
+        <button
+          type="submit"
+          className="w-full mt-5 py-3 rounded-xl text-sm font-bold"
+          style={{ background: C.primary, color: "#fff" }}
+        >
+          Continue
+        </button>
+      </form>
+    </div>
+  );
+}
+
+export function ProtectedApp() {
+  return (
+    <DeviceAccessGate>
+      <App />
+    </DeviceAccessGate>
   );
 }

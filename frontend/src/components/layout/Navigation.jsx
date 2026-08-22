@@ -4,10 +4,9 @@ import {
   CalendarClock,
   Plus,
   Building2,
-  Trash2,
+  RefreshCw,
 } from "lucide-react";
 import { C } from "../../lib/constants.js";
-import { clearAll } from "../../lib/storage.js";
 
 const NAV_ITEMS = [
   { id: "dashboard", label: "Dashboard", icon: Home },
@@ -15,24 +14,7 @@ const NAV_ITEMS = [
   { id: "followups", label: "Follow-ups", icon: CalendarClock },
 ];
 
-export function Sidebar({ view, goto, pendingCount }) {
-  const handleClearHistory = async () => {
-    if (
-      !window.confirm(
-        "Are you sure you want to delete ALL data? This cannot be undone.",
-      )
-    ) {
-      return;
-    }
-    try {
-      await clearAll();
-      alert("All data has been cleared. Refreshing...");
-      window.location.reload();
-    } catch (error) {
-      alert("Error clearing data: " + error.message);
-    }
-  };
-
+export function Sidebar({ view, goto, pendingCount, onSync, syncing }) {
   return (
     <aside className="hidden md:flex md:flex-col md:w-56 md:shrink-0 pb-10">
       <div className="flex items-center gap-2 px-2 mb-6">
@@ -88,19 +70,20 @@ export function Sidebar({ view, goto, pendingCount }) {
         })}
       </nav>
       <button
-        onClick={handleClearHistory}
-        className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-semibold text-left transition mt-auto"
-        style={{ background: "transparent", color: "#d32f2f" }}
-        title="Delete all data from database"
+        onClick={onSync}
+        disabled={syncing}
+        className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-semibold text-left transition mb-2 disabled:opacity-50"
+        style={{ background: C.surfaceAlt, color: C.primary }}
+        title="Reload data from database"
       >
-        <Trash2 size={17} />
-        Clear History
+        <RefreshCw size={17} className={syncing ? "animate-spin" : ""} />
+        {syncing ? "Syncing..." : "Sync from database"}
       </button>
     </aside>
   );
 }
 
-export function MobileNav({ view, goto, pendingCount }) {
+export function MobileNav({ view, goto, pendingCount, onSync, syncing }) {
   const items = [
     { id: "dashboard", label: "Home", icon: Home },
     { id: "businesses", label: "Businesses", icon: Users },
@@ -112,6 +95,15 @@ export function MobileNav({ view, goto, pendingCount }) {
       className="md:hidden fixed bottom-0 left-0 right-0 flex items-stretch justify-around px-2 pt-2 pb-[calc(env(safe-area-inset-bottom)+6px)] z-40"
       style={{ background: C.surface, borderTop: `1px solid ${C.border}` }}
     >
+      <button
+        onClick={onSync}
+        disabled={syncing}
+        className="absolute -top-11 right-3 flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-bold disabled:opacity-50"
+        style={{ background: C.primarySoft, color: C.primary }}
+      >
+        <RefreshCw size={12} className={syncing ? "animate-spin" : ""} />
+        Sync
+      </button>
       {items.map((item) => {
         const active = view === item.id;
         if (item.primary) {

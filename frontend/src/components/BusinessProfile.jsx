@@ -20,6 +20,9 @@ import {
   BUSINESS_STATUSES,
   SALES_STAGES,
   SECTOR_FIELDS,
+  CONTACT_METHODS,
+  NEXT_ACTIONS,
+  FOLLOWUP_METHODS,
 } from "../lib/constants.js";
 import { fmtDate, telLink, waLink, todayStr } from "../lib/helpers.js";
 import { generateSummary } from "../lib/aiSummary.js";
@@ -37,6 +40,9 @@ import {
   TextInput,
   TextArea,
   Select,
+  ConfirmDialog,
+  ChipGroup,
+  InterestPicker,
 } from "./ui/Primitives.jsx";
 
 function PreVisitSummary({ latestVisit }) {
@@ -197,11 +203,135 @@ function VisitDetail({ v }) {
   );
 }
 
+function EditVisitModal({ visit, onClose, onSave }) {
+  const [form, setForm] = useState({ ...visit });
+  const [saving, setSaving] = useState(false);
+  const set = (key) => (event) =>
+    setForm((current) => ({ ...current, [key]: event.target.value }));
+  const save = async () => {
+    if (!form.interestStatus || !form.feedback?.trim() || !form.nextAction)
+      return;
+    if (form.nextAction !== "No Action" && !form.nextFollowUpDate) return;
+    setSaving(true);
+    try {
+      await onSave(visit.id, {
+        ...form,
+        feedback: form.feedback.trim(),
+        nextFollowUpDate:
+          form.nextAction === "No Action" ? "" : form.nextFollowUpDate,
+        nextFollowUpMethod:
+          form.nextAction === "No Action" ? "" : form.nextFollowUpMethod,
+      });
+      onClose();
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <ModalShell title="Edit visit" onClose={onClose}>
+      <Field label="Contact method">
+        <ChipGroup
+          options={CONTACT_METHODS}
+          value={form.contactMethod}
+          onChange={(value) =>
+            setForm((current) => ({ ...current, contactMethod: value }))
+          }
+          columns={3}
+        />
+      </Field>
+      <Field label="Interest" required>
+        <InterestPicker
+          value={form.interestStatus}
+          onChange={(value) =>
+            setForm((current) => ({ ...current, interestStatus: value }))
+          }
+        />
+      </Field>
+      <Field label="Reason" required>
+        <TextArea value={form.feedback || ""} onChange={set("feedback")} />
+      </Field>
+      <Field label="What did they like?">
+        <TextArea value={form.liked || ""} onChange={set("liked")} />
+      </Field>
+      <Field label="Main objection">
+        <TextArea value={form.objection || ""} onChange={set("objection")} />
+      </Field>
+      <Field label="Requested feature">
+        <TextInput
+          value={form.requestedFeature || ""}
+          onChange={set("requestedFeature")}
+        />
+      </Field>
+      <Field label="Next action" required>
+        <ChipGroup
+          options={NEXT_ACTIONS}
+          value={form.nextAction}
+          onChange={(value) =>
+            setForm((current) => ({ ...current, nextAction: value }))
+          }
+          columns={3}
+        />
+      </Field>
+      {form.nextAction && form.nextAction !== "No Action" && (
+        <>
+          <Field label="Next follow-up date" required>
+            <TextInput
+              type="date"
+              value={form.nextFollowUpDate || ""}
+              onChange={set("nextFollowUpDate")}
+              min={todayStr()}
+            />
+          </Field>
+          <Field label="Next follow-up method">
+            <ChipGroup
+              options={FOLLOWUP_METHODS}
+              value={form.nextFollowUpMethod}
+              onChange={(value) =>
+                setForm((current) => ({
+                  ...current,
+                  nextFollowUpMethod: value,
+                }))
+              }
+              columns={4}
+            />
+          </Field>
+        </>
+      )}
+      <Field label="Notes">
+        <TextArea value={form.notes || ""} onChange={set("notes")} />
+      </Field>
+      <div className="flex gap-2 mt-2">
+        <button
+          onClick={onClose}
+          className="flex-1 py-3 rounded-xl text-sm font-bold"
+          style={{ background: C.surfaceAlt, color: C.inkSoft }}
+        >
+          Cancel
+        </button>
+        <button
+          disabled={saving}
+          onClick={save}
+          className="flex-1 py-3 rounded-xl text-sm font-bold disabled:opacity-50"
+          style={{ background: C.primary, color: "#fff" }}
+        >
+          {saving ? (
+            <Loader2 size={16} className="animate-spin mx-auto" />
+          ) : (
+            "Save changes"
+          )}
+        </button>
+      </div>
+    </ModalShell>
+  );
+}
+
 function EditBusinessModal({ business, onClose, onSave }) {
   const [form, setForm] = useState({
     ...business,
     sectorFields: { ...(business.sectorFields || {}) },
   });
+  const [saving, setSaving] = useState(false);
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
   const setSectorField = (k) => (e) =>
     setForm((f) => ({
@@ -278,11 +408,24 @@ function EditBusinessModal({ business, onClose, onSave }) {
           Cancel
         </button>
         <button
-          onClick={() => onSave(form)}
+          onClick={async () => {
+            setSaving(true);
+            try {
+              await onSave(form);
+              onClose();
+            } finally {
+              setSaving(false);
+            }
+          }}
+          disabled={saving}
           className="flex-1 py-3 rounded-xl text-sm font-bold"
           style={{ background: C.primary, color: "#fff" }}
         >
-          Save changes
+          {saving ? (
+            <Loader2 size={16} className="animate-spin mx-auto" />
+          ) : (
+            "Save changes"
+          )}
         </button>
       </div>
     </ModalShell>
@@ -297,19 +440,17 @@ export default function BusinessProfile({
   onReschedule,
   onDelete,
   onDeleteVisit,
+  onUpdateVisit,
 }) {
   const [expanded, setExpanded] = useState(visits[0]?.id || null);
   const [editing, setEditing] = useState(false);
+  const [editingVisit, setEditingVisit] = useState(null);
+  const [deleteVisitTarget, setDeleteVisitTarget] = useState(null);
+  const [confirmBusinessDelete, setConfirmBusinessDelete] = useState(false);
   const latest = visits[0] || null;
   const sectorFieldDefs = SECTOR_FIELDS[business.sector] || [];
 
   const handleDeleteBusiness = async () => {
-    if (
-      !window.confirm(
-        `Delete "${business.businessName}" and all its visits? This cannot be undone.`,
-      )
-    )
-      return;
     try {
       await onDelete(business.id);
       goto("businesses");
@@ -333,7 +474,7 @@ export default function BusinessProfile({
               <Pencil size={14} style={{ color: C.ink }} />
             </button>
             <button
-              onClick={handleDeleteBusiness}
+              onClick={() => setConfirmBusinessDelete(true)}
               className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold transition active:scale-95"
               title="Delete business"
               style={{ color: "#d32f2f", background: "#fdecea" }}
@@ -467,19 +608,20 @@ export default function BusinessProfile({
                   <div className="flex items-center gap-2 shrink-0">
                     <InterestBadge value={v.interestStatus} />
                     <button
-                      onClick={async (e) => {
+                      onClick={(e) => {
                         e.stopPropagation();
-                        if (
-                          !window.confirm(
-                            "Delete this visit? This cannot be undone.",
-                          )
-                        )
-                          return;
-                        try {
-                          await onDeleteVisit(v.id);
-                        } catch (error) {
-                          alert("Error deleting visit: " + error.message);
-                        }
+                        setEditingVisit(v);
+                      }}
+                      className="w-8 h-8 rounded-lg flex items-center justify-center"
+                      style={{ background: C.surfaceAlt }}
+                      title="Edit visit"
+                    >
+                      <Pencil size={13} style={{ color: C.ink }} />
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setDeleteVisitTarget(v);
                       }}
                       className="w-8 h-8 rounded-lg flex items-center justify-center transition active:scale-95"
                       style={{ background: "#fdecea" }}
@@ -515,8 +657,40 @@ export default function BusinessProfile({
           business={business}
           onClose={() => setEditing(false)}
           onSave={(patch) => {
-            onEdit(patch);
-            setEditing(false);
+            return onEdit(patch).then(() => setEditing(false));
+          }}
+        />
+      )}
+      {editingVisit && (
+        <EditVisitModal
+          visit={editingVisit}
+          onClose={() => setEditingVisit(null)}
+          onSave={onUpdateVisit}
+        />
+      )}
+      {confirmBusinessDelete && (
+        <ConfirmDialog
+          title="Delete business?"
+          message={`Delete "${business.businessName}" and all its visits? This cannot be undone.`}
+          onClose={() => setConfirmBusinessDelete(false)}
+          onConfirm={async () => {
+            await handleDeleteBusiness();
+            setConfirmBusinessDelete(false);
+          }}
+        />
+      )}
+      {deleteVisitTarget && (
+        <ConfirmDialog
+          title="Delete visit?"
+          message="Delete this visit? This cannot be undone."
+          onClose={() => setDeleteVisitTarget(null)}
+          onConfirm={async () => {
+            try {
+              await onDeleteVisit(deleteVisitTarget.id);
+              setDeleteVisitTarget(null);
+            } catch (error) {
+              alert("Error deleting visit: " + error.message);
+            }
           }}
         />
       )}

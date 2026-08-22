@@ -19,21 +19,14 @@ export function createApp() {
 
   app.use(express.json({ limit: "2mb" }));
 
-  app.get("/health", (_req, res) => {
-    res.json({ ok: true, service: "field-crm-backend" });
+  app.use("/api", (_req, res, next) => {
+    res.set("Cache-Control", "no-store, no-cache, must-revalidate");
+    res.set("Pragma", "no-cache");
+    next();
   });
 
-  // Clear all data endpoint
-  app.delete("/api/clear-all", async (_req, res) => {
-    try {
-      console.log("DELETE /api/clear-all: Clearing all data");
-      await pool.query("DELETE FROM visits");
-      await pool.query("DELETE FROM businesses");
-      res.json({ success: true, message: "All data cleared" });
-    } catch (error) {
-      console.error("DELETE /api/clear-all error:", error);
-      res.status(500).json({ error: "Failed to clear data" });
-    }
+  app.get("/health", (_req, res) => {
+    res.json({ ok: true, service: "field-crm-backend" });
   });
 
   app.use("/api/businesses", businessesRouter);

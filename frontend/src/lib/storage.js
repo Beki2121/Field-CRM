@@ -11,14 +11,63 @@ const LEGACY_KEYS = {
   visits: ["field_crm_visits", "crm_visits"],
   bundle: ["field_crm_data", "crm_data", "field_crm_export"],
 };
+const CACHE_KEYS = {
+  businesses: "field_crm_cached_businesses",
+  visits: "field_crm_cached_visits",
+  pending: "field_crm_pending_actions",
+};
+
+function readJson(key, fallback) {
+  try {
+    const value = localStorage.getItem(key);
+    return value ? JSON.parse(value) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function writeJson(key, value) {
+  localStorage.setItem(key, JSON.stringify(value));
+}
+
+function isOfflineError(error) {
+  return (
+    (typeof navigator !== "undefined" && navigator.onLine === false) ||
+    error?.name === "TypeError" ||
+    /failed to fetch|network/i.test(error?.message || "")
+  );
+}
+
+function queueAction(action) {
+  const pending = readJson(CACHE_KEYS.pending, []);
+  pending.push({ ...action, queuedAt: Date.now() });
+  writeJson(CACHE_KEYS.pending, pending);
+}
+
+async function requestOrQueue(action, fallback) {
+  try {
+    return await jsonFetch(action.url, action.options);
+  } catch (error) {
+    if (!isOfflineError(error)) throw error;
+    queueAction(action);
+    return fallback;
+  }
+}
+
+function cacheRecords(type, records) {
+  writeJson(CACHE_KEYS[type], records);
+  return records;
+}
 
 async function jsonFetch(url, options = {}) {
   const fullUrl = `${API_BASE}${url}`;
 
   const res = await fetch(fullUrl, {
     credentials: "include",
+    cache: "no-store",
     headers: {
       "Content-Type": "application/json",
+      "Cache-Control": "no-cache",
       ...(options.headers || {}),
     },
     ...options,
@@ -123,39 +172,113 @@ export async function migrateFromLocalStorage() {
 }
 
 export async function getBusinesses() {
-  return jsonFetch("/api/businesses");
+  try {
+    return cacheRecords("businesses", await jsonFetch("/api/businesses"));
+  } catch (error) {
+    const cached = readJson(CACHE_KEYS.businesses, null);
+    if (cached) return cached;
+    if (isOfflineError(error)) return [];
+    throw error;
+  }
 }
 
 export async function createBusiness(business) {
-  return jsonFetch("/api/businesses", {
-    method: "POST",
-    body: JSON.stringify(business),
-  });
+  const saved = await requestOrQueue(
+    {
+      url: "/api/businesses",
+      options: {
+        method: "POST",
+        body: JSON.stringify(business),
+      },
+    },
+    business,
+  );
+  const businesses = readJson(CACHE_KEYS.businesses, []);
+  cacheRecords("businesses", [
+    ...businesses.filter((item) => item.id !== saved.id),
+    saved,
+  ]);
+  return saved;
 }
 
 export async function saveBusinesses(list) {
-  return jsonFetch("/api/businesses", {
-    method: "PUT",
-    body: JSON.stringify(list),
-  });
+  const saved = await requestOrQueue(
+    {
+      url: "/api/businesses",
+      options: {
+        method: "PUT",
+        body: JSON.stringify(list),
+      },
+    },
+    list,
+  );
+  cacheRecords("businesses", list);
+  return saved;
 }
 
 export async function getVisits() {
-  return jsonFetch("/api/visits");
+  try {
+    return cacheRecords("visits", await jsonFetch("/api/visits"));
+  } catch (error) {
+    const cached = readJson(CACHE_KEYS.visits, null);
+    if (cached) return cached;
+    if (isOfflineError(error)) return [];
+    throw error;
+  }
 }
 
 export async function createVisit(visit) {
-  return jsonFetch("/api/visits", {
-    method: "POST",
-    body: JSON.stringify(visit),
-  });
+  const saved = await requestOrQueue(
+    {
+      url: "/api/visits",
+      options: {
+        method: "POST",
+        body: JSON.stringify(visit),
+      },
+    },
+    visit,
+  );
+  const visits = readJson(CACHE_KEYS.visits, []);
+  cacheRecords("visits", [
+    ...visits.filter((item) => item.id !== saved.id),
+    saved,
+  ]);
+  return saved;
 }
 
 export async function saveVisits(list) {
-  return jsonFetch("/api/visits", {
-    method: "PUT",
-    body: JSON.stringify(list),
-  });
+  const saved = await requestOrQueue(
+    {
+      url: "/api/visits",
+      options: {
+        method: "PUT",
+        body: JSON.stringify(list),
+      },
+    },
+    list,
+  );
+  cacheRecords("visits", list);
+  return saved;
+}
+
+export function getPendingCount() {
+  return readJson(CACHE_KEYS.pending, []).length;
+}
+
+export async function syncPendingActions() {
+  const pending = readJson(CACHE_KEYS.pending, []);
+  const remaining = [];
+  for (const action of pending) {
+    try {
+      await jsonFetch(action.url, action.options);
+    } catch (error) {
+      remaining.push(action);
+      if (isOfflineError(error)) break;
+      throw error;
+    }
+  }
+  writeJson(CACHE_KEYS.pending, remaining);
+  return pending.length - remaining.length;
 }
 
 export async function exportAll() {
@@ -166,20 +289,36 @@ export async function exportAll() {
   return { businesses, visits, exportedAt: new Date().toISOString() };
 }
 
-export async function clearAll() {
-  return jsonFetch("/api/clear-all", {
-    method: "DELETE",
-  });
-}
-
 export async function deleteBusiness(id) {
-  return jsonFetch(`/api/businesses/${id}`, {
-    method: "DELETE",
-  });
+  const result = await requestOrQueue(
+    {
+      url: `/api/businesses/${id}`,
+      options: {
+        method: "DELETE",
+      },
+    },
+    { success: true, queued: true },
+  );
+  cacheRecords(
+    "businesses",
+    readJson(CACHE_KEYS.businesses, []).filter((item) => item.id !== id),
+  );
+  return result;
 }
 
 export async function deleteVisit(id) {
-  return jsonFetch(`/api/visits/${id}`, {
-    method: "DELETE",
-  });
+  const result = await requestOrQueue(
+    {
+      url: `/api/visits/${id}`,
+      options: {
+        method: "DELETE",
+      },
+    },
+    { success: true, queued: true },
+  );
+  cacheRecords(
+    "visits",
+    readJson(CACHE_KEYS.visits, []).filter((item) => item.id !== id),
+  );
+  return result;
 }

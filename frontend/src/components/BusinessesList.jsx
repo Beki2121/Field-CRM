@@ -14,6 +14,7 @@ import {
   InterestBadge,
   TextInput,
   Select,
+  ConfirmDialog,
 } from "./ui/Primitives.jsx";
 
 export default function BusinessesList({
@@ -26,6 +27,7 @@ export default function BusinessesList({
   const [sectorFilter, setSectorFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [showFilters, setShowFilters] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState(null);
 
   const filtered = useMemo(() => {
     return businesses.filter((b) => {
@@ -163,19 +165,9 @@ export default function BusinessesList({
                     )}
                   </div>
                   <button
-                    onClick={async (e) => {
+                    onClick={(e) => {
                       e.stopPropagation();
-                      if (
-                        !window.confirm(
-                          `Delete "${b.businessName}" and all its visits? This cannot be undone.`,
-                        )
-                      )
-                        return;
-                      try {
-                        await onDelete(b.id);
-                      } catch (error) {
-                        alert("Error deleting business: " + error.message);
-                      }
+                      setDeleteTarget(b);
                     }}
                     className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold transition active:scale-95 shrink-0"
                     style={{ color: "#d32f2f", background: "#fdecea" }}
@@ -189,6 +181,21 @@ export default function BusinessesList({
             );
           })}
         </div>
+      )}
+      {deleteTarget && (
+        <ConfirmDialog
+          title="Delete business?"
+          message={`Delete "${deleteTarget.businessName}" and all its visits? This cannot be undone.`}
+          onClose={() => setDeleteTarget(null)}
+          onConfirm={async () => {
+            try {
+              await onDelete(deleteTarget.id);
+              setDeleteTarget(null);
+            } catch (error) {
+              alert("Error deleting business: " + error.message);
+            }
+          }}
+        />
       )}
     </div>
   );

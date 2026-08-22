@@ -9,6 +9,8 @@ import {
   deleteBusiness,
   deleteVisit,
   migrateFromLocalStorage,
+  syncPendingActions,
+  getPendingCount,
 } from "../lib/storage.js";
 import { uid, todayStr } from "../lib/helpers.js";
 
@@ -18,22 +20,49 @@ export function useCrmData() {
   const [businesses, setBusinesses] = useState([]);
   const [visits, setVisits] = useState([]);
 
-  useEffect(() => {
-    (async () => {
+  const loadData = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
       try {
         await migrateFromLocalStorage();
-        const [b, v] = await Promise.all([getBusinesses(), getVisits()]);
-        setBusinesses(b);
-        setVisits(v);
-        setError(null);
       } catch (err) {
-        console.error("Failed to load CRM data:", err);
-        setError(err.message || "Failed to connect to the database.");
-      } finally {
-        setLoading(false);
+        console.warn("Legacy data migration skipped:", err.message);
       }
-    })();
+
+      const [businessResult, visitResult] = await Promise.allSettled([
+        getBusinesses(),
+        getVisits(),
+      ]);
+
+      if (businessResult.status === "rejected") {
+        throw businessResult.reason;
+      }
+
+      setBusinesses(businessResult.value);
+
+      if (visitResult.status === "rejected") {
+        console.warn("Failed to load visits:", visitResult.reason);
+        setVisits([]);
+      } else {
+        setVisits(visitResult.value);
+      }
+
+      return {
+        businesses: businessResult.value,
+        visits: visitResult.status === "fulfilled" ? visitResult.value : [],
+      };
+    } catch (err) {
+      console.error("Failed to load CRM data:", err);
+      setError(err.message || "Failed to connect to the database.");
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
 
   const persistBusinesses = useCallback(async (next) => {
     setBusinesses(next);
@@ -152,6 +181,11 @@ export function useCrmData() {
     await persistBusinesses(next);
   };
 
+  const updateVisit = async (id, patch) => {
+    const next = visits.map((v) => (v.id === id ? { ...v, ...patch } : v));
+    await persistVisits(next);
+  };
+
   const addVisit = async (data) => {
     const v = {
       id: uid(),
@@ -214,6 +248,12 @@ export function useCrmData() {
     setVisits((prev) => prev.filter((v) => v.id !== id));
   };
 
+  const sync = useCallback(async () => {
+    const synced = await syncPendingActions();
+    const data = await loadData();
+    return { ...data, synced, pending: getPendingCount() };
+  }, [loadData]);
+
   return {
     loading,
     error,
@@ -229,10 +269,14 @@ export function useCrmData() {
     sectorSummary,
     addBusiness,
     updateBusiness,
+    updateVisit,
     addVisit,
     completeFollowUp,
     rescheduleFollowUp,
     removeBusiness,
     removeVisit,
+    sync,
+    pendingCount: getPendingCount(),
+    reloadData: loadData,
   };
 }
